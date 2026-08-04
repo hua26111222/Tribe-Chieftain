@@ -34,7 +34,8 @@
       "Bash(powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"c:/Users/wb659999/OneDrive - WBG/Desktop/部落首领/register_task.ps1\")",
       "Bash(echo \"\")",
       "Bash(powershell.exe -NoProfile -Command \"Start-ScheduledTask -TaskName 'Tribe-Chieftain Auto Sync'\")",
-      "Bash(powershell.exe -NoProfile -Command \"Get-ScheduledTaskInfo -TaskName 'Tribe-Chieftain Auto Sync' | Select-Object LastRunTime, LastTaskResult\")"
+      "Bash(powershell.exe -NoProfile -Command \"Get-ScheduledTaskInfo -TaskName 'Tribe-Chieftain Auto Sync' | Select-Object LastRunTime, LastTaskResult\")",
+      "Bash(rm register_task.ps1)"
     ]
   }
 }
