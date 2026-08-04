@@ -1,5 +1,4 @@
-$projectPath = "C:\Users\wb659999\OneDrive - WBG\Desktop\部落首领"
-Set-Location $projectPath
+Set-Location $PSScriptRoot
 
 $status = git status --porcelain
 if ($status) {
