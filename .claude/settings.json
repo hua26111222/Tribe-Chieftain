@@ -19,7 +19,16 @@
       "Bash(unset TOKEN)",
       "Bash(git init *)",
       "Bash(git add *)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(cat /tmp/create_repo_response.json 2>&1)",
+      "Read(//tmp/**)",
+      "Bash(git remote *)",
+      "Bash(git push *)",
+      "Bash(powershell.exe -NoProfile -Command ' *)",
+      "Bash(powershell.exe -NoProfile -Command '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-ScheduledTask | Where-Object {$_.TaskName -like '\\\\''*Auto Sync*'\\\\''} | Select-Object TaskName, State')",
+      "Bash(powershell.exe -NoProfile -Command 'Get-ScheduledTask | Where-Object {$_.TaskName -like '\\\\''*Auto Sync*'\\\\'' -and $_.TaskName -notlike '\\\\''CD0.1*'\\\\''} | Unregister-ScheduledTask -Confirm:$false')",
+      "Bash(powershell.exe -NoProfile -Command \"\\(Get-ScheduledTask -TaskName 'Tribe-Chieftain Auto Sync'\\).Triggers | Select-Object StartBoundary, DaysInterval\")",
+      "Bash(powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"C:\\\\Users\\\\wb659999\\\\OneDrive - WBG\\\\Desktop\\\\部落首领\\\\auto_sync.ps1\")"
     ]
   }
 }
