@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -c \"c:\\\\Users\\\\wb659999\\\\OneDrive - WBG\\\\Desktop\\\\部落首领\\\\tribe.html\")",
+      "Bash(ls -la \"c:\\\\Users\\\\wb659999\\\\OneDrive - WBG\\\\Desktop\\\\\" ; echo \"---gh---\"; gh --version 2>&1; gh auth status 2>&1)",
+      "Read(//c/Users/wb659999/OneDrive - WBG/**)",
+      "Bash(ls -la \"c:/Users/wb659999/OneDrive - WBG/Desktop\")",
+      "Read(//c/Users/wb659999/OneDrive - WBG/Desktop/**)",
+      "Read(//c/Users/wb659999/OneDrive - WBG/Desktop/CD0.1/**)",
+      "Read(//c/Users/wb659999/OneDrive - WBG/Desktop/Hunkui/**)",
+      "Bash(schtasks /query /fo TABLE)",
+      "Bash(cmd.exe /c \"schtasks /query /fo TABLE\")",
+      "Bash(powershell.exe -NoProfile -Command \"Get-ScheduledTask | Select-Object TaskName, State | Format-Table -AutoSize\")",
+      "Bash(powershell.exe -NoProfile -Command \"Get-ScheduledTask -TaskName 'CD0.1 Auto Sync' | Select-Object -ExpandProperty Actions; Get-ScheduledTask -TaskName 'CD0.1 Auto Sync' | Select-Object -ExpandProperty Triggers | Format-List *; Get-ScheduledTaskInfo -TaskName 'CD0.1 Auto Sync'\")",
+      "Bash(powershell.exe -NoProfile -Command \"\\(Get-ScheduledTask -TaskName 'CD0.1 Auto Sync'\\).Triggers.Repetition | Format-List *; Write-Host '---STATE---'; \\(Get-ScheduledTask -TaskName 'CD0.1 Auto Sync'\\).State\")",
+      "Bash(gh --version)",
+      "Bash(gh auth *)",
+      "Bash(git credential *)",
+      "Bash(unset TOKEN)",
+      "Bash(git init *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
+    ]
+  }
+}

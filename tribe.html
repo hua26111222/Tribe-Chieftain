@@ -1,0 +1,1121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>部落首领</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    background: #1a1815;
+    color: #d8d0c0;
+    font-family: serif, "Songti SC", "SimSun";
+    margin: 0;
+    padding: 0;
+  }
+  body { padding: 16px; }
+  /* 手机窄屏：原来的两栏经营页在这个宽度以下会挤成一团，改成上下堆叠、字号缩小、表格横向可滑 */
+  @media (max-width: 760px) {
+    body { padding: 8px; font-size: 15px; }
+    .topbar { flex-wrap: wrap; gap: 6px 16px; padding: 8px; }
+    .cols { flex-direction: column; }
+    .actionbar { flex-wrap: wrap; gap: 8px; }
+    .actionbar > div { display: flex; flex-wrap: wrap; gap: 8px; width: 100%; }
+    .btn { padding: 8px 12px; font-size: 15px; }
+    select { font-size: 15px; padding: 4px; max-width: 100%; }
+    th, td { font-size: 12px; padding: 3px 4px; }
+    .roster-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  }
+  .warn { color: #a04030; }
+  .btn {
+    background: #1a1815;
+    color: #d8d0c0;
+    border: 1px solid #d8d0c0;
+    font-family: inherit;
+    font-size: 14px;
+    padding: 4px 10px;
+    cursor: pointer;
+  }
+  .btn:hover { background: #2a2620; }
+  .btn:disabled { color: #666; border-color: #555; cursor: default; }
+  .btn.warn-btn { border-color: #a04030; color: #a04030; }
+  select {
+    background: #1a1815;
+    color: #d8d0c0;
+    border: 1px solid #d8d0c0;
+    font-family: inherit;
+    font-size: 13px;
+  }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #4a453d; padding: 3px 6px; text-align: left; font-size: 13px; }
+  th { color: #a89a80; font-weight: normal; }
+  .topbar {
+    border: 1px solid #d8d0c0;
+    padding: 8px 12px;
+    display: flex;
+    gap: 30px;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  .cols { display: flex; gap: 12px; }
+  .col-left { flex: 3; }
+  .col-right { flex: 2; }
+  .panel {
+    border: 1px solid #4a453d;
+    padding: 10px;
+    margin-bottom: 10px;
+  }
+  .panel h3 {
+    margin: 0 0 8px 0;
+    font-size: 14px;
+    color: #a89a80;
+    border-bottom: 1px solid #4a453d;
+    padding-bottom: 4px;
+  }
+  .row { margin: 3px 0; }
+  .small { font-size: 12px; color: #a89a80; }
+  .actionbar {
+    border: 1px solid #d8d0c0;
+    padding: 8px 12px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .dot-on { color: #d8d0c0; }
+  .dot-off { color: #4a453d; }
+  .overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: #1a1815; color: #d8d0c0;
+    display: flex; align-items: center; justify-content: center;
+    z-index: 10;
+  }
+  .overlay-box { border: 1px solid #d8d0c0; padding: 30px; max-width: 700px; }
+</style>
+</head>
+<body>
+
+<div id="app"></div>
+
+<script>
+/* ============================================================
+   SPEC.md 第一期：§2 §3 §4 §5 §6 §7 §11 §14.1 §14.2
+   产物：9 轮经营（无战斗），能看 24 人能不能活过两个冬天。
+   ============================================================ */
+
+// ---------- §2 核心公式（照抄） ----------
+const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+
+const AGE_COEF  = a => a<13?0.3 : a<17?0.6 : a<41?1.0 : a<51?0.8 : 0.5;
+const SEX_COEF  = s => s==='男' ? 1.0 : 0.75;
+const COND_COEF = { 正常:1.0, 孕:0.4, 哺乳:0.4, 伤:0.5, 病:0.6, 冻伤:0.7 };
+
+function mind(p){
+  return clamp(Math.round(p.baseMind * (1 - p.fog/110)), 0, 10);
+}
+function body(p){
+  return clamp(Math.round(
+    p.baseBody * AGE_COEF(p.age) * SEX_COEF(p.sex) * COND_COEF[p.cond||'正常'] * (1 + p.fog/200)
+  ), 0, 10);
+}
+function tier(m){ return m>=6 ? '甲' : m>=4 ? '乙' : m>=2 ? '丙' : '丁'; }
+function capacity(p){ return mind(p) + 1; }
+function canLead(p){
+  const t = tier(mind(p));
+  return (t==='甲' || (t==='乙' && mind(p)===5)) && body(p)>=6;
+}
+// §3 身体门槛
+function canOutside(p){ return body(p) >= 7; }   // 出圈
+function canWall(p){ return body(p) >= 6; }       // 上墙（第二期用）
+function canHeavy(p){ return body(p) >= 5; }      // 重活
+function canLight(p){ return body(p) >= 2; }      // 轻活
+// §3 玩家行动点
+function actionPointsForTier(t){ return t==='甲'?4 : t==='乙'?3 : t==='丙'?2 : 1; }
+
+// ---------- §4.2 人物数据（照抄） ----------
+const PEOPLE_INIT = [
+ {id:'shuang',name:'霜', sex:'男', age:34, baseBody:8, baseMind:7, fog:15, clan:'老家', post:'军头',   craft:null},
+ {id:'er',    name:'二', sex:'男', age:41, baseBody:6, baseMind:7, fog:20, clan:'来家', post:'政头',   craft:null},
+ {id:'he',    name:'河', sex:'男', age:29, baseBody:7, baseMind:8, fog:18, clan:'放家', post:'谍头',   craft:null},
+ {id:'chui',  name:'锤', sex:'男', age:38, baseBody:6, baseMind:8, fog:12, clan:'匠家', post:'工匠头', craft:{铁:3}},
+ {id:'ding',  name:'钉', sex:'男', age:19, baseBody:7, baseMind:6, fog:25, clan:'匠家', post:'工匠',   craft:{铁:1}},
+ {id:'wu',    name:'五', sex:'女', age:31, baseBody:5, baseMind:6, fog:30, clan:'来家', post:'闲',     craft:{鞣:1}},
+ {id:'qi',    name:'七', sex:'男', age:17, baseBody:6, baseMind:7, fog:22, clan:'来家', post:'闲',     craft:null},
+ {id:'liu',   name:'六', sex:'男', age:26, baseBody:8, baseMind:4, fog:40, clan:'来家', post:'守备',   craft:null},
+ {id:'da',    name:'大', sex:'男', age:43, baseBody:7, baseMind:2, fog:62, clan:'来家', post:'守备',   craft:null},
+ {id:'san',   name:'三', sex:'男', age:38, baseBody:7, baseMind:3, fog:55, clan:'来家', post:'守备',   craft:null},
+ {id:'dong',  name:'冬', sex:'男', age:45, baseBody:6, baseMind:3, fog:58, clan:'老家', post:'守备',   craft:null},
+ {id:'ju',    name:'锯', sex:'女', age:22, baseBody:5, baseMind:5, fog:35, clan:'匠家', post:'下地',   craft:null},
+ {id:'ba',    name:'八', sex:'男', age:16, baseBody:5, baseMind:5, fog:28, clan:'来家', post:'下地',   craft:null},
+ {id:'yun',   name:'云', sex:'男', age:33, baseBody:8, baseMind:4, fog:45, clan:'老家', post:'采石',   craft:null},
+ {id:'lei',   name:'雷', sex:'男', age:28, baseBody:7, baseMind:3, fog:50, clan:'老家', post:'采石',   craft:null},
+ {id:'hui',   name:'灰', sex:'男', age:36, baseBody:7, baseMind:2, fog:60, clan:'放家', post:'砍木',   craft:null},
+ {id:'tu',    name:'土', sex:'女', age:25, baseBody:5, baseMind:4, fog:42, clan:'放家', post:'下地',   craft:null},
+ {id:'feng',  name:'风', sex:'男', age:21, baseBody:7, baseMind:5, fog:33, clan:'老家', post:'砍木',   craft:{木:1}},
+ {id:'zhen',  name:'针', sex:'女', age:29, baseBody:6, baseMind:5, fog:38, clan:'匠家', post:'闲',     craft:null, cond:'孕'},
+ {id:'si',    name:'四', sex:'女', age:34, baseBody:6, baseMind:4, fog:45, clan:'来家', post:'闲',     craft:null, cond:'哺乳'},
+ {id:'xue',   name:'雪', sex:'女', age:52, baseBody:5, baseMind:6, fog:40, clan:'老家', post:'闲',     craft:{医:2}},
+ {id:'zao',   name:'凿', sex:'男', age:58, baseBody:5, baseMind:7, fog:35, clan:'匠家', post:'闲',     craft:{弓:2}},
+ {id:'yu',    name:'雨', sex:'女', age:11, baseBody:5, baseMind:4, fog:30, clan:'老家', post:'轻活',   craft:null},
+ {id:'zhui',  name:'锥', sex:'女', age: 9, baseBody:4, baseMind:3, fog:28, clan:'匠家', post:'轻活',   craft:null},
+];
+
+const KIN = [
+ {type:'夫妻', a:'da',   b:'si'},
+ {type:'夫妻', a:'chui', b:'zhen'},
+ {type:'夫妻', a:'dong', b:'xue'},
+ {type:'父子', a:'da',   b:'qi'},
+ {type:'父子', a:'da',   b:'ba'},
+ {type:'父女', a:'dong', b:'yu'},
+ {type:'兄妹', a:'ding', b:'zhui'},
+ {type:'兄弟', a:'yun',  b:'lei'},
+];
+
+// ---------- §6 季节与时间（照抄） ----------
+const SEASONS      = ['春','夏','秋','冬','春','夏','秋','冬','春荒'];
+const BATTLE_TURNS  = [3, 6, 9];
+const FUEL_NEED     = {春:4,   夏:0,   秋:4,   冬:12,  春荒:6};
+const WOOD_COEF     = {春:1.0, 夏:1.2, 秋:1.0, 冬:0.5, 春荒:0.8};
+const HUNT_COEF     = {春:1.0, 夏:1.3, 秋:1.1, 冬:0.4, 春荒:0.5};
+const GRAIN_DECAY   = {春:0.03,夏:0.05,秋:0.02,冬:0.01,春荒:0.03};
+
+const SEASON_TIPS = {
+  4: '早上水缸结了层皮。',
+  5: '地化开了。',
+  7: '该收了。',
+  9: '窖底见了。',
+};
+
+// ---------- §11 危机事件（九个，写死） ----------
+// 每条事件：text，options[]（value/label/apply），noOption（无选项时的固定效果）
+const CRISIS_EVENTS = {
+  1: {
+    text: '化雪的水漫了下面两块地。',
+    options: [
+      {key:'A', label:'派4人挖沟（占本轮人力）', apply(st){
+          const pool = livingPeople(st).filter(p=>!['军头','政头','谍头','工匠头'].includes(p.post));
+          const farmersFirst = [...pool.filter(p=>p.task==='下地'), ...pool.filter(p=>p.task!=='下地')];
+          const chosen = farmersFirst.slice(0,4);
+          st._diggingIds = chosen.map(p=>p.id);
+          st.turnLog.push('派'+(chosen.map(p=>p.name).join('、')||'没人手可派')+'去挖沟，这几个人本轮不能再干别的活。');
+        }},
+      {key:'B', label:'不管', apply(st){ st.fieldPower = Math.max(0, st.fieldPower - 12); st.turnLog.push('没管地里的事，田力少了12。'); }},
+    ],
+  },
+  2: {
+    text: '井水浑了，有味。',
+    options: [
+      {key:'A', label:'用药', apply(st){ st.res.药 = Math.max(0, st.res.药 - 1); st.turnLog.push('用了一份药治水患。'); }},
+      {key:'B', label:'喝河水', apply(st){ st.people.filter(p=>p.alive).forEach(p=>p.fog+=5); st.turnLog.push('全族喝了河水，人人昏度+5。'); }},
+      {key:'C', label:'不管', apply(st){
+          const cand = st.people.filter(p=>p.alive && !st.innerCircle.includes(p.id)).sort((a,b)=>body(a)-body(b)).slice(0,3);
+          cand.forEach(p=>{ p.cond='病'; p.condLeft=sickDuration(st); });
+          st.turnLog.push('没管井水，'+cand.map(p=>p.name).join('、')+' 病倒了（'+sickDuration(st)+'轮）。');
+        }},
+    ],
+  },
+  3: { text: '他们赶在收完之前来了。', battle: true },
+  4: {
+    text: '大雪封了三天。',
+    noOption(st){
+      st._blizzard = true;
+      st.turnLog.push('大雪封了三天：砍木/打猎/出圈本轮全部归零，取暖需柴照旧要12。');
+    },
+  },
+  5: {
+    text: '窖里少了六石粮。',
+    pre(st){ st.res.粮 = Math.max(0, st.res.粮 - 6); },
+    options: [
+      {key:'A', label:'追查（花1行动点）', costAP:1, apply(st){ st.turnLog.push('查了一圈：是「四」偷偷多吃了。'); }},
+      {key:'B', label:'不查', apply(st){ st.prestige -= 5; st.turnLog.push('没查，威望−5。'); }},
+      {key:'C', label:'罚一个人', apply(st){ st.prestige += 3; st.turnLog.push('随手罚了一个人，威望+3。'); }},
+    ],
+  },
+  6: { text: '他们从两边来。', battle: true },
+  7: {
+    text: '早霜。',
+    noOption(st){ st._earlyFrost = true; st.turnLog.push('早霜：这季秋收打八折。'); },
+  },
+  8: {
+    text: '「冬」的手冻坏了。',
+    options: [
+      {key:'A', label:'用药', apply(st){ st.res.药 = Math.max(0, st.res.药 - 1); st.turnLog.push('给冬用了药，保住了手。'); }},
+      {key:'B', label:'不用', apply(st){
+          const dong = st.people.find(p=>p.id==='dong');
+          if (dong){ dong.baseBody = Math.max(0, dong.baseBody - 2); }
+          st.turnLog.push('没用药，冬的手落下了永久残疾（体质−2）。');
+        }},
+    ],
+  },
+  9: {
+    text: '窖底见了。',
+    noOption(st){
+      st.people.filter(p=>p.alive).forEach(p=>{ p.baseBody = Math.max(0, p.baseBody - 1); });
+      st.turnLog.push('全族本轮吃了半份口粮，人人体质−1。');
+      st._finalBattle = true;
+    },
+  },
+};
+
+// ---------- §5 起始状态（照抄） ----------
+function makeInitState(){
+  return {
+    turn: 1,
+    res:  { 粮:62, 铁:14, 木:20, 石:90, 皮:6, 药:3 },
+    ammo: { 箭:60, 枪:30, 石弹:150 },
+    walls: [40,40,40,60,40,40],
+    wallsReported: [40,40,40,60,40,40],
+    fieldPower: 0,
+    innerSlots: 8,
+    innerCircle: ['shuang','er','he','chui','ding','qi','ju','ba'],
+    prestige: 55,
+    playerFog: 18,
+    people: PEOPLE_INIT.map(p => ({ ...p, alive:true, cond: p.cond||null, condLeft: p.cond?2:0, fogFloor:0, task:null })),
+    log: [],
+    turnLog: [],       // 本轮明账，每轮结算后重置
+    deaths: [],
+    apprentice: null,  // {teacherId, targetId, skill, turns}
+    ap: 0,
+    apMax: 0,
+    crisisResolved: false,
+    gameOver: false,
+    gameEnded: false,
+    // ---- v1.1 追加：换头 / 建设 / 远征 ----
+    heads: {军头:'shuang', 政头:'er', 谍头:'he', 工匠头:'chui'},
+    buildings: {granary:false, herbHut:false, workshopExt:false, watchtower:false},
+    expedition: {active:null, mineDone:false, villageDone:false},
+  };
+}
+
+// §11.x 远征：邻村带回的写死人物（非随机生成）
+const LIN_CANDIDATE = {id:'lin', name:'霖', sex:'女', age:24, baseBody:6, baseMind:6, fog:20, clan:'外来', post:'闲', craft:null};
+
+let state = makeInitState();
+
+// ---------- 岗位与产出（§7.2） ----------
+const POSTS = ['军头','政头','谍头','工匠头','工匠','下地','砍木','采石','打猎','挖废墟','守备','驻矿','轻活','闲'];
+
+// 岗位归属的头（用于超编惩罚 §7.2）—— 规格书未给出明确映射表，这里采用一种合理划分，
+// 详见对话里对用户的说明（判断依据：军事岗归军头，生产岗归工匠头，田产岗归政头，谍头暂不辖人）。
+// 只有真正产出的岗位才占用头的"管人"名额；「闲」「轻活」不算任何人管，不受超编限制。
+// v1.1：改成按"头衔"映射（而不是写死 id），这样 §7.1 的"换头"才能生效。
+const POST_OWNER_TITLE = {
+  '守备':'军头',
+  '下地':'政头', '打猎':'政头',
+  '砍木':'工匠头', '采石':'工匠头', '挖废墟':'工匠头', '工匠':'工匠头', '驻矿':'工匠头',
+};
+
+function livingPeople(st){ return st.people.filter(p=>p.alive); }
+function personById(st,id){ return st.people.find(p=>p.id===id); }
+
+function playerMind(){ return mind({ baseMind: 8, fog: state.playerFog }); }
+function playerTier(){ return tier(playerMind()); }
+
+// 本轮是否可正常干活（事件1·A 会把4个人抽去挖沟；远征在外的人，占掉本轮/本次远征期间人力）
+function isAvailable(st, p){
+  if ((st._diggingIds||[]).includes(p.id)) return false;
+  if (st.expedition.active && st.expedition.active.ids.includes(p.id)) return false;
+  return true;
+}
+function workingAt(st, post){ return livingPeople(st).filter(p=>p.task===post && isAvailable(st,p)); }
+
+// 某岗位当前人数
+function countPost(st, post){ return workingAt(st, post).length; }
+
+// 建筑对头 capacity 的加成（§7.4）
+function buildingCapBonus(st, headId){
+  let bonus = 0;
+  if (headId === st.heads['工匠头'] && st.buildings.workshopExt) bonus += 2;
+  if (headId === st.heads['军头'] && st.buildings.watchtower) bonus += 2;
+  return bonus;
+}
+
+// 有效产出人数（超编惩罚：超过该头 capacity 的部分 ×0.5）
+function effectiveWorkers(st, post){
+  const n = countPost(st, post);
+  const ownerTitle = POST_OWNER_TITLE[post];
+  if (!ownerTitle) return n;
+  const ownerId = st.heads[ownerTitle];
+  const owner = personById(st, ownerId);
+  if (!owner || !owner.alive) return n; // 头本人不在，暂不做超编限制
+  const cap = capacity(owner) + buildingCapBonus(st, ownerId);
+  // 该头名下所有岗位合计人数
+  const ownedPosts = Object.keys(POST_OWNER_TITLE).filter(k=>POST_OWNER_TITLE[k]===ownerTitle);
+  const totalUnderOwner = ownedPosts.reduce((s,ps)=>s+countPost(st,ps),0);
+  if (totalUnderOwner <= cap) return n;
+  // 按比例把超出部分打对折（简化：整个头超编时，所有其名下岗位的人数按同一比例打折）
+  const overRatio = (totalUnderOwner - cap) / totalUnderOwner;
+  return n - n*overRatio*0.5;
+}
+
+// ---------- 结算：产出 ----------
+function resolveProduction(st){
+  const season = SEASONS[st.turn-1];
+  const blizzard = !!st._blizzard;
+
+  // 下地（仅春夏）
+  if ((season==='春'||season==='夏') && !blizzard) {
+    const workers = workingAt(st, '下地');
+    const eff = effectiveWorkers(st,'下地');
+    const ratio = workers.length>0 ? eff/workers.length : 0;
+    const sum = workers.reduce((s,p)=>s+body(p)*ratio,0);
+    let gain = Math.round(sum);
+    if (st._plantingLimited) gain = Math.round(gain*0.5);
+    st.fieldPower += gain;
+  }
+  // 砍木
+  if (!blizzard) {
+    const n = effectiveWorkers(st,'砍木');
+    st.res.木 += Math.round(n*3*WOOD_COEF[season]);
+  }
+  // 采石
+  {
+    const n = effectiveWorkers(st,'采石');
+    st.res.石 += Math.round(n*12);
+  }
+  // 打猎
+  if (!blizzard) {
+    const n = effectiveWorkers(st,'打猎');
+    st.res.粮 += Math.round(n*2*HUNT_COEF[season]);
+    st.res.皮 += Math.floor(n*0.5);
+  }
+  // 挖废墟（body>=7，至少3人才有产出）
+  if (!blizzard) {
+    const diggers = workingAt(st, '挖废墟').filter(p=>canOutside(p));
+    if (diggers.length >= 3) {
+      const eff = effectiveWorkers(st,'挖废墟');
+      st.res.铁 += Math.round(eff*2);
+      diggers.forEach(p=>{ p.fog += 4; p.fogFloor += 1; p._wentOutside = true; });
+    }
+  }
+  // 驻矿（§11.x 远征找到明矿之后才解锁）
+  if (!blizzard && st.expedition.mineDone) {
+    const n = effectiveWorkers(st, '驻矿');
+    st.res.铁 += Math.round(n*4);
+  }
+  // 工匠：每人每轮一选（task 形如 'craft:造箭' 等）
+  livingPeople(st).filter(p=>p.task && p.task.startsWith('craft:') && isAvailable(st,p)).forEach(p=>{
+    const choice = p.task.slice(6);
+    doCraftTask(st, p, choice);
+  });
+}
+
+function hasSkill(p, skill){ return p.craft && p.craft[skill] && mind(p)>=5; }
+
+function doCraftTask(st, p, choice){
+  if (choice === '造箭') {
+    if (!hasSkill(p,'弓')) { st.turnLog.push(p.name+'想造箭，可他不会「弓」这门手艺，白忙一场。'); return; }
+    if (st.res.铁>=3 && st.res.木>=3) { st.res.铁-=3; st.res.木-=3; st.ammo.箭 += 15; st.turnLog.push(p.name+'造了15支箭。'); }
+    else st.turnLog.push(p.name+'想造箭，可铁或木不够。');
+  } else if (choice.startsWith('修墙')) {
+    if (!hasSkill(p,'铁') && !hasSkill(p,'木')) { st.turnLog.push(p.name+'想修墙，可他不会「铁」或「木」这门手艺。'); return; }
+    const seg = parseInt(choice.split(':')[1], 10) || 0;
+    if (st.res.铁>=5 && st.res.木>=4 && st.res.石>=8) {
+      st.res.铁-=5; st.res.木-=4; st.res.石-=8;
+      st.walls[seg] = Math.min(100, st.walls[seg]+15);
+      st.wallsReported[seg] = st.walls[seg];
+      st.turnLog.push(p.name+'修了'+WALL_SEG_NAMES[seg]+'，+15。');
+    } else st.turnLog.push(p.name+'想修'+WALL_SEG_NAMES[seg]+'，可材料不够（需铁5木4石8）。');
+  } else if (choice === '修装备') {
+    st.turnLog.push(p.name+'修了件装备（第二期加入具体装备栏后生效）。');
+  } else if (choice === '带徒') {
+    // 由 UI 单独设置 st.apprentice，这里只做进度推进
+  } else if (choice === '建粮仓') {
+    if (st.buildings.granary) { st.turnLog.push(p.name+'想建粮仓，可已经建好了。'); return; }
+    if (st.res.木>=15 && st.res.石>=20) { st.res.木-=15; st.res.石-=20; st.buildings.granary=true; p.task='工匠'; st.turnLog.push(p.name+'把粮仓建好了，存粮以后损耗减半。'); }
+    else st.turnLog.push(p.name+'想建粮仓，可材料不够（需木15石20）。');
+  } else if (choice === '建药庐') {
+    if (st.buildings.herbHut) { st.turnLog.push(p.name+'想建药庐，可已经建好了。'); return; }
+    if (st.res.木>=10 && st.res.皮>=5 && st.res.药>=2) { st.res.木-=10; st.res.皮-=5; st.res.药-=2; st.buildings.herbHut=true; p.task='工匠'; st.turnLog.push(p.name+'把药庐建好了，病人/冻伤的人以后好得更快。'); }
+    else st.turnLog.push(p.name+'想建药庐，可材料不够（需木10皮5药2）。');
+  } else if (choice === '建工坊扩建') {
+    if (st.buildings.workshopExt) { st.turnLog.push(p.name+'想扩建工坊，可已经建好了。'); return; }
+    if (st.res.铁>=10 && st.res.木>=10 && st.res.石>=10) { st.res.铁-=10; st.res.木-=10; st.res.石-=10; st.buildings.workshopExt=true; p.task='工匠'; st.turnLog.push(p.name+'把工坊扩建好了，工匠头能管的人多了2个。'); }
+    else st.turnLog.push(p.name+'想扩建工坊，可材料不够（需铁10木10石10）。');
+  } else if (choice === '建哨塔') {
+    if (st.buildings.watchtower) { st.turnLog.push(p.name+'想建哨塔，可已经建好了。'); return; }
+    if (st.res.石>=30 && st.res.木>=10) { st.res.石-=30; st.res.木-=10; st.buildings.watchtower=true; p.task='工匠'; st.turnLog.push(p.name+'把哨塔建好了，守备能管的人多了2个（防御加成留到第二期战斗系统生效）。'); }
+    else st.turnLog.push(p.name+'想建哨塔，可材料不够（需石30木10）。');
+  }
+}
+
+// ---------- 结算：秋收 / 春播 ----------
+function resolveFarming(st){
+  const season = SEASONS[st.turn-1];
+  if (season === '秋') {
+    let gain = Math.round(st.fieldPower * 1.2);
+    if (st._earlyFrost) gain = Math.round(gain*0.8);
+    st.res.粮 += gain;
+    st.turnLog.push('秋收：田力'+st.fieldPower+' 换成 '+gain+' 石粮。');
+    st.fieldPower = 0;
+    st._plantingLimited = false;
+  }
+  if (season === '春') {
+    st.res.粮 -= 12;
+    if (st.res.粮 < 12) {
+      st._plantingLimited = true;
+      st.turnLog.push('粮不够种，强制吃了种子，今年田力上限打对折。');
+    }
+    st.turnLog.push('播种：粮−12。');
+  }
+}
+
+// 药庐建成后，病/冻伤好得更快（§7.4）
+function sickDuration(st){ return st.buildings.herbHut ? 1 : 2; }
+
+// ---------- 结算：取暖 ----------
+function resolveHeating(st){
+  const season = SEASONS[st.turn-1];
+  const need = st._blizzard ? 12 : FUEL_NEED[season];
+  const burn = Math.min(need, st.res.木);
+  st.res.木 -= burn;
+  const gap = need - burn;
+  if (gap > 0) {
+    const n = Math.ceil(gap/2);
+    const cand = livingPeople(st).filter(p=>!st.innerCircle.includes(p.id)).sort((a,b)=>body(a)-body(b)).slice(0,n);
+    cand.forEach(p=>{
+      p.baseBody = Math.max(0, p.baseBody-2);
+      p.cond = '冻伤'; p.condLeft = sickDuration(st);
+      if (body(p) <= 0) {
+        p.alive = false;
+        st.deaths.push({id:p.id, name:p.name, turn:st.turn, cause:'冻死'});
+        st.turnLog.push(p.name+' 冻死了。');
+      }
+    });
+    if (cand.length>0) st.turnLog.push('柴不够（缺'+gap+'），'+cand.map(p=>p.name).join('、')+' 挨了冻。');
+  }
+}
+
+// ---------- 结算：吃粮 ----------
+function resolveGrain(st){
+  const season = SEASONS[st.turn-1];
+  // 季节性粮食损耗（§6 GRAIN_DECAY；建了粮仓后减半，见§7.4）
+  const decayRate = GRAIN_DECAY[season] * (st.buildings.granary ? 0.5 : 1);
+  const decay = Math.round(st.res.粮 * decayRate);
+  if (decay>0){ st.res.粮 -= decay; st.turnLog.push('存粮损耗了'+decay+'石（受潮/鼠患）。'); }
+
+  const n = livingPeople(st).length;
+  st.res.粮 -= n;
+  st.turnLog.push('吃粮：'+n+'人，−'+n+'石。');
+  if (st.res.粮 < 0) {
+    st._graindShort = true;
+    st.turnLog.push('粮已经欠账了，全族昏度+3。');
+  }
+}
+
+// ---------- 结算：昏度 ----------
+function resolveFog(st){
+  livingPeople(st).forEach(p=>{
+    let d = st.innerCircle.includes(p.id) ? -2 : 1.5;
+    if (p._wentOutside) d += 4;
+    if (st._graindShort) d += 3;
+    p.fog = clamp(p.fog + d, 0, 100);
+    if (p._wentOutside) p.fog = Math.max(p.fog, p.fogFloor);
+  });
+}
+
+// ---------- 带徒进度 ----------
+function resolveApprentice(st){
+  if (!st.apprentice) return;
+  const {teacherId, targetId, skill} = st.apprentice;
+  const teacher = personById(st, teacherId);
+  const target = personById(st, targetId);
+  if (!teacher || !teacher.alive || !target || !target.alive || teacher.task!=='craft:带徒') {
+    st.apprentice = null; return;
+  }
+  target.fog = clamp(target.fog - 3, 0, 100);
+  st.apprentice.turns = (st.apprentice.turns||0) + 1;
+  st.turnLog.push(teacher.name+'带着'+target.name+'学「'+skill+'」（第'+st.apprentice.turns+'/4轮）。');
+  if (st.apprentice.turns >= 4) {
+    target.craft = target.craft || {};
+    target.craft[skill] = 1;
+    st.turnLog.push(target.name+'学会了「'+skill+'」！');
+    st.apprentice = null;
+  }
+}
+
+// ---------- §11.x 远征：跨轮结算 ----------
+const EXPEDITION_DAYS = { valley:1, mine:2, village:1 };
+const DEST_NAMES = { valley:'附近山谷', mine:'废弃矿坑·明矿', village:'邻村' };
+
+function dispatchExpedition(st, site, ids, resource){
+  st.ap -= 1;
+  const returnTurn = st.turn + EXPEDITION_DAYS[site] - 1;
+  st.expedition.active = { dest:site, ids, returnTurn, resource: site==='valley' ? resource : null };
+  st.turnLog.push('派'+ids.map(id=>personById(st,id).name).join('、')+'去'+DEST_NAMES[site]+'，预计第'+returnTurn+'轮回来。');
+}
+
+// 放在 resolveProduction 之后调用：远征在外期间人力已被 isAvailable() 排除在本轮产出之外，
+// 这里只负责"到点了没有"，到点才让人和资源真的落地。
+function resolveExpedition(st){
+  const exp = st.expedition.active;
+  if (!exp) return;
+  if (st.turn < exp.returnTurn) return; // 还没到回来的轮次
+  const goneFog = 6; // 出远门比挖废墟(+4)更累
+  if (exp.dest === 'valley') {
+    const bodySum = exp.ids.reduce((s,id)=>{ const p=personById(st,id); return (p&&p.alive) ? s+body(p) : s; },0);
+    const gain = Math.round(bodySum * 1.0);
+    st.res[exp.resource] += gain;
+    st.turnLog.push('远征队从附近山谷回来了，带回 '+gain+' '+exp.resource+'。');
+  } else if (exp.dest === 'mine') {
+    st.res.铁 += 60; st.res.石 += 30;
+    st.expedition.mineDone = true;
+    st.turnLog.push('远征队找到了明矿！一次性带回铁60、石30，往后可以派人常驻挖矿（岗位「驻矿」）了。');
+  } else if (exp.dest === 'village') {
+    if (!personById(st,'lin')) {
+      st.people.push({ ...LIN_CANDIDATE, alive:true, cond:null, condLeft:0, fogFloor:0, task:null });
+      st.turnLog.push('远征队从邻村带回了一个人——霖，从今往后就是部落里的人了。');
+    }
+    st.expedition.villageDone = true;
+  }
+  exp.ids.forEach(id=>{ const p=personById(st,id); if (p&&p.alive) p.fog = clamp(p.fog+goneFog, 0, 100); });
+  st.expedition.active = null;
+}
+
+// ---------- 每轮结束主流程（§7 步骤⑦⑧⑨，第一期不含⑨战斗） ----------
+function endTurn(){
+  if (state.gameOver || state.gameEnded) return;
+
+  resolveApprentice(state);
+  resolveProduction(state);
+  resolveExpedition(state);
+  resolveFarming(state);
+  resolveHeating(state);
+  resolveGrain(state);
+  resolveFog(state);
+
+  // 清理本轮临时标记
+  state.people.forEach(p=>{ p._wentOutside=false; });
+  state._graindShort = false;
+  state._diggingIds = [];
+
+  // 冻伤/疾病持续轮数递减
+  state.people.forEach(p=>{
+    if (p.cond && p.condLeft>0) {
+      p.condLeft--;
+      if (p.condLeft<=0) p.cond=null;
+    }
+  });
+
+  if (BATTLE_TURNS.includes(state.turn)) {
+    state.turnLog.push('（本应在此爆发守城战——守城系统留到第二期实现，本期直接跳过战斗判定。）');
+  }
+
+  state.log.push({turn: state.turn, season: SEASONS[state.turn-1], lines: state.turnLog.slice()});
+
+  const aliveCount = livingPeople(state).length;
+  if (aliveCount === 0) {
+    state.gameOver = true;
+    state.gameEnded = true;
+  } else if (state.turn >= 9) {
+    state.gameEnded = true;
+  } else {
+    state.turn += 1;
+    state._blizzard = false;
+    state._earlyFrost = false;
+    state.crisisResolved = false;
+    startTurn();
+  }
+  render();
+}
+
+function startTurn(){
+  const t = playerTier();
+  state.apMax = actionPointsForTier(t);
+  state.ap = state.apMax;
+  state.turnLog = [];
+  const ev = CRISIS_EVENTS[state.turn];
+  if (ev && ev.pre) ev.pre(state);
+}
+startTurn();
+
+// ==================== 渲染 ====================
+function el(tag, attrs, ...children){
+  const e = document.createElement(tag);
+  if (attrs) for (const k in attrs) {
+    if (k==='onclick') e.onclick = attrs[k];
+    else if (k==='class') e.className = attrs[k];
+    else e.setAttribute(k, attrs[k]);
+  }
+  children.flat().forEach(c=>{
+    if (c===null||c===undefined) return;
+    e.appendChild(typeof c==='string'||typeof c==='number' ? document.createTextNode(c) : c);
+  });
+  return e;
+}
+
+function reportLine(headId, text){
+  const p = personById(state, headId);
+  if (!p || !p.alive) return (headId==='chui'?'工匠头':headId==='shuang'?'军头':headId==='er'?'政头':'谍头')+'：（人没了，没人报。）';
+  const t = tier(mind(p));
+  if (t==='丙'||t==='丁') return p.post+'·'+p.name+'：（沉默，脑子不够，报不出来。）';
+  if (t==='乙') return p.post+'·'+p.name+'：「'+text.vague+'」';
+  return p.post+'·'+p.name+'：'+text.exact;
+}
+
+function renderReport(){
+  const lines = [
+    reportLine('shuang', {exact:'防务没问题，士气还行。', vague:'怕是不太够。'}),
+    reportLine('er', {exact:'存粮'+state.res.粮+'石，够吃'+Math.max(0,Math.floor(state.res.粮/Math.max(1,livingPeople(state).length)))+'轮。', vague:'粮食怕是不太够。'}),
+    reportLine('he', {exact:'外头暂时没探到动静。', vague:'外头怕是不太平。'}),
+    reportLine('chui', {exact:'墙段进度：'+state.wallsReported.join('/'), vague:'墙上怕是不太够。'}),
+  ];
+  return el('div',{class:'panel'},
+    el('h3',null,'① 早报'),
+    ...lines.map(t=>el('div',{class:'row'},t))
+  );
+}
+
+function renderEvent(){
+  const ev = CRISIS_EVENTS[state.turn];
+  const box = el('div',{class:'panel'}, el('h3',null,'② 危机事件 · 第'+state.turn+'轮'));
+  box.appendChild(el('div',{class:'row'}, '「'+ev.text+'」'));
+  if (state.crisisResolved) {
+    box.appendChild(el('div',{class:'small'}, '（本轮事件已处理。）'));
+    return box;
+  }
+  if (ev.battle) {
+    box.appendChild(el('div',{class:'small warn'}, '这本该直接进入守城战——守城系统留到第二期。本轮按无事发生处理。'));
+    const btn = el('button',{class:'btn', onclick: ()=>{ state.crisisResolved=true; render(); }}, '知道了');
+    box.appendChild(btn);
+  } else if (ev.noOption) {
+    const btn = el('button',{class:'btn', onclick: ()=>{ ev.noOption(state); state.crisisResolved=true; render(); }}, '知道了（无可选项）');
+    box.appendChild(btn);
+  } else {
+    ev.options.forEach(opt=>{
+      const disabled = opt.costAP && state.ap < opt.costAP;
+      const btn = el('button',{class:'btn', onclick: ()=>{
+        if (opt.costAP) state.ap -= opt.costAP;
+        opt.apply(state);
+        state.crisisResolved = true;
+        render();
+      }}, opt.key+'. '+opt.label + (opt.costAP?'（'+opt.costAP+'行动点）':''));
+      if (disabled) btn.disabled = true;
+      box.appendChild(btn);
+    });
+  }
+  return box;
+}
+
+const WALL_SEG_NAMES = ['段一','段二','段三','门','段五','段六'];
+
+function craftOptionsFor(p){
+  const opts = [{v:'', label:'（不干手艺活）'}];
+  if (hasSkill(p,'弓')) opts.push({v:'craft:造箭', label:'造箭（耗铁3木3，+15箭）'});
+  if (hasSkill(p,'铁') || hasSkill(p,'木')) {
+    WALL_SEG_NAMES.forEach((segName,i)=>{
+      opts.push({v:'craft:修墙:'+i, label:'修'+segName+'（耗铁5木4石8，+15耐久）'});
+    });
+    // §7.4 建设（v1.1 追加，跟修墙同门槛：需「铁」或「木」）
+    if (!state.buildings.granary) opts.push({v:'craft:建粮仓', label:'建粮仓（耗木15石20，永久减半存粮损耗）'});
+    if (!state.buildings.herbHut) opts.push({v:'craft:建药庐', label:'建药庐（耗木10皮5药2，病/冻伤好得更快）'});
+    if (!state.buildings.workshopExt) opts.push({v:'craft:建工坊扩建', label:'建工坊扩建（耗铁10木10石10，工匠头名额+2）'});
+    if (!state.buildings.watchtower) opts.push({v:'craft:建哨塔', label:'建哨塔（耗石30木10，守备名额+2）'});
+  }
+  if (p.craft) opts.push({v:'craft:修装备', label:'修装备（耗铁1或皮1）'});
+  if (p.craft) opts.push({v:'craft:带徒', label:'带徒'});
+  return opts;
+}
+
+let rosterOpen = false; // 花名册折叠状态，跨 render() 保留（v1.1）
+
+function renderAssign(){
+  const box = el('div',{class:'panel', id:'panel-assign'});
+  const details = el('details',null);
+  details.open = rosterOpen;
+  details.addEventListener('toggle', ()=>{ rosterOpen = details.open; });
+  details.appendChild(el('summary',null, '④⑤ 排人 / 工匠一选（花名册，'+livingPeople(state).length+'人，点开看）'));
+  const table = el('table',null);
+  table.appendChild(el('tr',null, el('th',null,'名'),el('th',null,'家'),el('th',null,'身'),el('th',null,'脑'),el('th',null,'档'),el('th',null,'岗位'),el('th',null,'手艺任务')));
+  livingPeople(state).forEach(p=>{
+    // v1.1：头衔归属看 state.heads（可被"换头"改变），不再写死 id
+    const headTitle = Object.keys(state.heads).find(k=>state.heads[k]===p.id);
+    const jobSel = el('select',null);
+    const eligiblePosts = ['闲','轻活'];
+    if (canHeavy(p)) {
+      eligiblePosts.push('下地','砍木','采石','打猎','守备');
+      if (state.expedition.mineDone) eligiblePosts.push('驻矿');
+    }
+    if (canOutside(p)) eligiblePosts.push('挖废墟');
+    if (mind(p)>=5 && p.craft) eligiblePosts.push('工匠');
+    if (headTitle) eligiblePosts.unshift(headTitle);
+    // §4.2 给定的起始岗位始终保留可选，不因身体门槛被强制挤掉
+    // （规格书自己的初始名单里就有身体不够格但仍安排上岗的人，比如年幼的孩子）
+    // 手艺具体任务（如 craft:造箭）在岗位栏里显示为「工匠」，具体任务由右侧手艺栏选
+    const currentPost = (p.task && p.task.startsWith('craft:')) ? '工匠' : (p.task || p.post);
+    eligiblePosts.push(currentPost);
+    const uniquePosts = [...new Set(eligiblePosts)];
+    uniquePosts.forEach(post=>{
+      const o = el('option',{value:post}, post);
+      if (currentPost===post) o.setAttribute('selected','selected');
+      jobSel.appendChild(o);
+    });
+    if (p.task===null) p.task = p.post;
+    jobSel.onchange = (e)=>{ p.task = e.target.value; render(); };
+
+    let craftCell = document.createTextNode('—');
+    if (p.task==='工匠' || (p.task && p.task.startsWith('craft:'))) {
+      const csel = el('select',null);
+      craftOptionsFor(p).forEach(o=>{
+        const oo = el('option',{value:o.v}, o.label);
+        if ((p.task||'').startsWith('craft:') ? p.task===o.v : o.v==='') oo.setAttribute('selected','selected');
+        csel.appendChild(oo);
+      });
+      csel.onchange = (e)=>{
+        p.task = e.target.value || '工匠';
+        if (e.target.value==='craft:带徒') {
+          const others = livingPeople(state).filter(x=>x.id!==p.id && !(x.craft&&x.craft[Object.keys(p.craft)[0]]));
+          if (others.length>0) {
+            state.apprentice = {teacherId:p.id, targetId:others[0].id, skill:Object.keys(p.craft)[0], turns:0};
+          }
+        }
+        render();
+      };
+      craftCell = csel;
+    }
+
+    const busy = !isAvailable(state, p);
+    const tr = el('tr',null,
+      el('td',null, p.name + (busy ? '（外派中）' : '')),
+      el('td',null,p.clan[0]),
+      el('td',null,String(body(p))),
+      el('td',null,String(mind(p))),
+      el('td',null,tier(mind(p))),
+      el('td',null,jobSel),
+      el('td',null,craftCell),
+    );
+    table.appendChild(tr);
+  });
+  const scrollWrap = el('div',{class:'roster-scroll'});
+  scrollWrap.appendChild(table);
+  details.appendChild(scrollWrap);
+  box.appendChild(details);
+  return box;
+}
+
+// §7.1 换头（v1.1 追加）：真的把某个头换成另一个人当
+function renderHeads(){
+  const box = el('div',{class:'panel'}, el('h3',null,'四头（真换人，1行动点，威望−3）'));
+  ['军头','政头','谍头','工匠头'].forEach(title=>{
+    const curId = state.heads[title];
+    const cur = personById(state, curId);
+    const label = cur ? (cur.alive ? cur.name : cur.name+'（已故）') : '（空缺）';
+    const row = el('div',{class:'row'}, title+'：'+label+'　');
+    const sel = el('select',null, el('option',{value:''},'（选人换上，需脑≥6）'));
+    livingPeople(state).filter(p=>p.id!==curId && !Object.values(state.heads).includes(p.id) && tier(mind(p))==='甲')
+      .forEach(p=>{ sel.appendChild(el('option',{value:p.id}, p.name+'（脑'+mind(p)+'）')); });
+    const btn = el('button',{class:'btn', onclick:()=>{
+      const id = sel.value;
+      if (!id || state.ap<1) return;
+      const newHead = personById(state, id);
+      state.ap -= 1;
+      state.prestige -= 3;
+      if (cur && cur.alive) cur.task = '闲';
+      newHead.task = title;
+      state.heads[title] = id;
+      state.turnLog.push(title+'换成了'+newHead.name+'（原'+label+'退下，威望−3）。');
+      render();
+    }}, '换（1行动点）');
+    row.appendChild(sel);
+    row.appendChild(btn);
+    box.appendChild(row);
+  });
+  return box;
+}
+
+function renderInnerCircle(){
+  const box = el('div',{class:'panel'}, el('h3',null,'⑥ 内圈名额（'+state.innerCircle.length+'/'+state.innerSlots+'，改动每次花1行动点）'));
+  const list = el('div',null);
+  state.innerCircle.forEach(id=>{
+    const p = personById(state,id);
+    if (!p) return;
+    const btn = el('button',{class:'btn', onclick:()=>{
+      if (state.ap<1){ return; }
+      state.ap -= 1;
+      state.innerCircle = state.innerCircle.filter(x=>x!==id);
+      render();
+    }}, (p.alive?p.name:p.name+'（已故）')+' ×');
+    list.appendChild(btn);
+  });
+  box.appendChild(list);
+  if (state.innerCircle.length < state.innerSlots) {
+    const sel = el('select',null, el('option',{value:''},'（选人补进内圈）'));
+    livingPeople(state).filter(p=>!state.innerCircle.includes(p.id)).forEach(p=>{
+      sel.appendChild(el('option',{value:p.id}, p.name+'（'+p.clan[0]+'）'));
+    });
+    const btn = el('button',{class:'btn', onclick:()=>{
+      const id = sel.value;
+      if (!id || state.ap<1) return;
+      state.ap -= 1;
+      state.innerCircle.push(id);
+      render();
+    }}, '补进（1行动点）');
+    box.appendChild(el('div',{class:'row'}, sel, btn));
+  }
+  return box;
+}
+
+// §11.x 远征（v1.1 追加）——零随机，只有门槛，没有概率
+const expeditionPicks = { valley: new Set(), mine: new Set(), village: new Set() };
+let valleyResource = '铁';
+
+function renderExpeditionSite(site, requireCount, requireMindSum, desc){
+  const pool = livingPeople(state).filter(canOutside);
+  const picks = expeditionPicks[site];
+  [...picks].forEach(id=>{ if (!pool.find(p=>p.id===id)) picks.delete(id); }); // 死了/不再合格就取消勾选
+
+  const box = el('div',{class:'row'});
+  box.appendChild(el('div',{class:'small'}, DEST_NAMES[site]+'：'+desc));
+  if (site==='valley') {
+    const rsel = el('select',null);
+    ['铁','木','粮'].forEach(r=>{
+      const o = el('option',{value:r}, r);
+      if (r===valleyResource) o.setAttribute('selected','selected');
+      rsel.appendChild(o);
+    });
+    rsel.onchange = (e)=>{ valleyResource = e.target.value; render(); };
+    box.appendChild(el('div',{class:'row small'}, '带回哪种：', rsel));
+  }
+  const list = el('div',null);
+  pool.forEach(p=>{
+    const cbId = 'exp_'+site+'_'+p.id;
+    const cb = el('input',{type:'checkbox', id:cbId});
+    cb.checked = picks.has(p.id);
+    cb.onchange = ()=>{ if (cb.checked) picks.add(p.id); else picks.delete(p.id); render(); };
+    const lbl = el('label',{for:cbId}, cb, document.createTextNode(p.name+'(身'+body(p)+'智'+mind(p)+')　'));
+    list.appendChild(lbl);
+  });
+  box.appendChild(list);
+
+  const count = picks.size;
+  const mindSum = [...picks].reduce((s,id)=>{ const p=personById(state,id); return p ? s+mind(p) : s; },0);
+  const okCount = count >= requireCount;
+  const okMind = mindSum >= requireMindSum;
+  const ready = okCount && okMind && state.ap>=1 && !state.expedition.active;
+  let reason = '';
+  if (state.expedition.active) reason = '已有一队在外，等他们回来再派';
+  else if (!okCount) reason = '还差'+(requireCount-count)+'人（要≥'+requireCount+'人）';
+  else if (!okMind) reason = '这几人智力总和'+mindSum+'，差'+(requireMindSum-mindSum)+'（要≥'+requireMindSum+'）';
+  else if (state.ap<1) reason = '行动点不够';
+
+  const btn = el('button',{class:'btn', onclick:()=>{
+    if (!ready) return;
+    dispatchExpedition(state, site, [...picks], valleyResource);
+    picks.clear();
+    render();
+  }}, '派出（1行动点）' + (reason ? '　'+reason : ''));
+  if (!ready) btn.disabled = true;
+  box.appendChild(btn);
+  return box;
+}
+
+function renderExpedition(){
+  const box = el('div',{class:'panel', id:'panel-expedition'}, el('h3',null,'远征（选人出征；零随机，只看是否达门槛，不是掷骰）'));
+  const exp = state.expedition;
+  if (exp.active) {
+    const names = exp.active.ids.map(id=>{ const p=personById(state,id); return p?p.name:'？'; }).join('、');
+    box.appendChild(el('div',{class:'row'}, DEST_NAMES[exp.active.dest]+'：'+names+' 已出发，预计第'+exp.active.returnTurn+'轮回来。'));
+    return box;
+  }
+  box.appendChild(renderExpeditionSite('valley', 2, 0, '可反复去；铁/木/粮任选一种，数量=派出人体总和'));
+  if (!exp.mineDone) {
+    box.appendChild(renderExpeditionSite('mine', 4, 12, '一次性大目标；找到后一次性铁+60石+30，并解锁「驻矿」岗位'));
+  } else {
+    box.appendChild(el('div',{class:'row small'}, DEST_NAMES.mine+'：已开采，去④⑤排人里把人排到「驻矿」就能持续产铁。'));
+  }
+  if (!exp.villageDone) {
+    box.appendChild(renderExpeditionSite('village', 2, 10, '一次性寻人；找到后带回写死人物「霖」，并入部落'));
+  } else {
+    box.appendChild(el('div',{class:'row small'}, DEST_NAMES.village+'：路已经走过了，没有更多人了。'));
+  }
+  return box;
+}
+
+// ---------- 部落一览地图（v1.1 追加，§0 视觉例外：手写 SVG，不是图片/图标库） ----------
+function svgEl(tag, attrs){
+  const e = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+function buildingIcon(kind, built){
+  const fg = built ? '#d8d0c0' : '#4a453d';
+  const svg = svgEl('svg', {width:'36', height:'36', viewBox:'0 0 36 36'});
+  if (kind==='granary') {
+    svg.appendChild(svgEl('rect',{x:6,y:16,width:24,height:16,fill:'none',stroke:fg}));
+    svg.appendChild(svgEl('polygon',{points:'4,16 18,4 32,16',fill:'none',stroke:fg}));
+  } else if (kind==='herbHut') {
+    svg.appendChild(svgEl('rect',{x:8,y:14,width:20,height:18,fill:'none',stroke:fg}));
+    svg.appendChild(svgEl('line',{x1:18,y1:19,x2:18,y2:29,stroke:fg}));
+    svg.appendChild(svgEl('line',{x1:13,y1:24,x2:23,y2:24,stroke:fg}));
+  } else if (kind==='workshopExt') {
+    svg.appendChild(svgEl('polygon',{points:'18,4 30,11 30,25 18,32 6,25 6,11',fill:'none',stroke:fg}));
+  } else if (kind==='watchtower') {
+    svg.appendChild(svgEl('rect',{x:13,y:10,width:10,height:22,fill:'none',stroke:fg}));
+    svg.appendChild(svgEl('polygon',{points:'10,10 26,10 18,2',fill:'none',stroke:fg}));
+  } else if (kind==='mine') {
+    svg.appendChild(svgEl('polygon',{points:'18,4 30,18 18,32 6,18',fill: built?fg:'none', stroke:fg}));
+  }
+  return svg;
+}
+function renderMap(){
+  const box = el('div',{class:'panel'}, el('h3',null,'部落一览（点色块跳到对应操作）'));
+  const row = el('div',{style:'display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;'});
+
+  WALL_SEG_NAMES.forEach((n,i)=>{
+    const v = state.wallsReported[i];
+    const shade = v>=70 ? '#d8d0c0' : v>=40 ? '#a89a80' : '#4a453d';
+    const tile = el('div',{style:'text-align:center;cursor:pointer;'});
+    const svg = svgEl('svg',{width:'24',height:'32',viewBox:'0 0 24 32'});
+    svg.appendChild(svgEl('rect',{x:2,y:4,width:20,height:26,fill:shade,stroke:'#d8d0c0'}));
+    tile.appendChild(svg);
+    tile.appendChild(el('div',{class:'small'}, n));
+    tile.onclick = ()=>{ const t=document.getElementById('panel-actionbar'); if (t) t.scrollIntoView(); };
+    row.appendChild(tile);
+  });
+
+  [
+    {kind:'granary', key:'granary', label:'粮仓'},
+    {kind:'herbHut', key:'herbHut', label:'药庐'},
+    {kind:'workshopExt', key:'workshopExt', label:'工坊'},
+    {kind:'watchtower', key:'watchtower', label:'哨塔'},
+  ].forEach(b=>{
+    const built = state.buildings[b.key];
+    const tile = el('div',{style:'text-align:center;cursor:pointer;'});
+    tile.appendChild(buildingIcon(b.kind, built));
+    tile.appendChild(el('div',{class:'small'}, b.label+(built?'':'（未建）')));
+    tile.onclick = ()=>{ const t=document.getElementById('panel-assign'); if (t) t.scrollIntoView(); };
+    row.appendChild(tile);
+  });
+
+  const mineTile = el('div',{style:'text-align:center;cursor:pointer;'});
+  mineTile.appendChild(buildingIcon('mine', state.expedition.mineDone));
+  mineTile.appendChild(el('div',{class:'small'}, state.expedition.mineDone?'明矿（已开采）':'明矿（未开采）'));
+  mineTile.onclick = ()=>{ const t=document.getElementById('panel-expedition'); if (t) t.scrollIntoView(); };
+  row.appendChild(mineTile);
+
+  box.appendChild(row);
+  return box;
+}
+
+function renderLedger(){
+  const box = el('div',{class:'panel'}, el('h3',null,'记账表 · 明账'));
+  const recent = state.log.slice(-3).reverse();
+  recent.forEach(entry=>{
+    box.appendChild(el('div',{class:'row'}, '— 第'+entry.turn+'轮（'+entry.season+'）—'));
+    entry.lines.forEach(l=>box.appendChild(el('div',{class:'small'}, l)));
+  });
+  if (state.deaths.length>0){
+    box.appendChild(el('div',{class:'row warn'}, '死者：'+state.deaths.map(d=>d.name+'(第'+d.turn+'轮,'+d.cause+')').join('、')));
+  }
+  return box;
+}
+
+function renderCantDo(){
+  const box = el('div',{class:'panel'}, el('h3',null,'做不了的事'));
+  const items = [];
+  const diggers = workingAt(state, '挖废墟');
+  const canDig = livingPeople(state).filter(p=>canOutside(p));
+  if (diggers.length>0 && diggers.length<3) {
+    items.push('✖ 挖不了铁：只排了 '+diggers.length+' 个人去挖废墟（'+diggers.map(p=>p.name).join('、')+'），挖废墟最少要3个人。');
+  } else if (diggers.length===0 && canDig.length>0) {
+    items.push('✖ 没人挖废墟：能出圈的有 '+canDig.length+' 个（'+canDig.map(p=>p.name).join('、')+'），但没排去挖废墟，铁矿产出为0。');
+  }
+  const bowman = livingPeople(state).find(p=>hasSkill(p,'弓'));
+  if (!bowman) items.push('✖ 造不出箭：会「弓」这门手艺的人已经没有能干活的了。');
+  const ironman = livingPeople(state).find(p=>hasSkill(p,'铁')||hasSkill(p,'木'));
+  if (!ironman) items.push('✖ 修不了墙：会「铁」或「木」这门手艺的人已经没有能干活的了。');
+  const doctor = livingPeople(state).find(p=>p.craft&&p.craft.医);
+  if (!doctor) items.push('✖ 没人能治重伤：会「医」这门手艺的人已经没有能干活的了。');
+  const leaders = livingPeople(state).filter(canLead);
+  items.push('（提示）能当队长的现在有 '+leaders.length+' 个：'+(leaders.map(p=>p.name).join('、')||'一个都没有')+'——守城编队要到第二期才能用上他们。');
+  if (items.length===0) items.push('目前没有明显做不了的事。');
+  return el('div',{class:'panel'}, el('h3',null,'做不了的事'), ...items.map(t=>el('div',{class: t.startsWith('✖')?'row warn':'row small'}, t)));
+}
+
+function renderCraftStatus(){
+  const skills = ['铁','弓','医','鞣','木'];
+  const box = el('div',{class:'panel'}, el('h3',null,'手艺状态（简版，等级细节第三期加入）'));
+  skills.forEach(sk=>{
+    const holders = livingPeople(state).filter(p=>p.craft && p.craft[sk] && mind(p)>=2);
+    const ok = holders.some(p=>mind(p)>=5);
+    const mark = holders.length===0 ? '✖ 没人会了' : ok ? '✔' : '⚠ 智力不够，做不出来';
+    box.appendChild(el('div',{class:'row'}, sk+'  '+mark+'  '+holders.map(p=>p.name+'(智'+mind(p)+')').join('、')));
+  });
+  return box;
+}
+
+function renderTopbar(){
+  const t = playerTier();
+  const dots = Array.from({length:4},(_,i)=> i<state.ap ? '●' : '○').join('');
+  const seasonTip = SEASON_TIPS[state.turn] ? '  ——'+SEASON_TIPS[state.turn] : '';
+  return el('div',{class:'topbar'},
+    el('div',null,'第'+state.turn+'轮 '+SEASONS[state.turn-1]+seasonTip),
+    el('div',null,'行动点 '+dots+'（'+t+'档）'),
+    el('div',null,'昏度(你) '+state.playerFog),
+    el('div',null,'威望 '+state.prestige),
+    el('div',null,'粮'+state.res.粮+' 铁'+state.res.铁+' 木'+state.res.木+(state.res.木<8?' ⚠':'')+' 石'+state.res.石+' 皮'+state.res.皮+' 药'+state.res.药),
+    el('div',null,'活人 '+livingPeople(state).length+'/'+state.people.length),
+  );
+}
+
+function renderActionbar(){
+  const bar = el('div',{class:'actionbar', id:'panel-actionbar'});
+  const left = el('div',null);
+  const segSel = el('select',null);
+  WALL_SEG_NAMES.forEach((n,i)=>segSel.appendChild(el('option',{value:i}, n)));
+  const viewBtn = el('button',{class:'btn', onclick:()=>{
+    if (state.ap<1) return;
+    const seg = parseInt(segSel.value,10);
+    alert(WALL_SEG_NAMES[seg]+' 真实耐久：'+state.walls[seg]+'（工匠头上报：'+state.wallsReported[seg]+'）');
+    state.ap -= 1; render();
+  }}, '亲自查看这段城墙（1行动点）');
+  left.appendChild(segSel);
+  left.appendChild(viewBtn);
+  bar.appendChild(left);
+  const endBtn = el('button',{class:'btn warn-btn', onclick: endTurn}, state.turn>=9 ? '结算最后一轮' : '结束本轮');
+  if (!state.crisisResolved) endBtn.disabled = true;
+  bar.appendChild(endBtn);
+  return bar;
+}
+
+function renderEnded(){
+  const alive = livingPeople(state);
+  const dead = state.deaths;
+  return el('div',{class:'overlay'},
+    el('div',{class:'overlay-box'},
+      el('h2',null, alive.length===0 ? '部落灭绝了。' : '第一期结束：熬过了9轮。'),
+      el('div',{class:'row'}, '活下来 '+alive.length+' 人，死了 '+dead.length+' 人。'),
+      el('div',{class:'row'}, '死者：'+(dead.map(d=>d.name+'（第'+d.turn+'轮，'+d.cause+'）').join('、')||'无')),
+      el('div',{class:'row small'}, '（第二期起会加入守城战、装备与编队，这一期先看经营能不能撑住。）'),
+    )
+  );
+}
+
+function render(){
+  const app = document.getElementById('app');
+  app.innerHTML = '';
+  if (state.gameEnded) { app.appendChild(renderEnded()); return; }
+  app.appendChild(renderTopbar());
+  app.appendChild(renderMap());
+  const cols = el('div',{class:'cols'});
+  const left = el('div',{class:'col-left'});
+  left.appendChild(renderReport());
+  left.appendChild(renderEvent());
+  left.appendChild(renderAssign());
+  left.appendChild(renderHeads());
+  left.appendChild(renderInnerCircle());
+  left.appendChild(renderExpedition());
+  const right = el('div',{class:'col-right'});
+  right.appendChild(renderLedger());
+  right.appendChild(renderCantDo());
+  right.appendChild(renderCraftStatus());
+  cols.appendChild(left);
+  cols.appendChild(right);
+  app.appendChild(cols);
+  app.appendChild(renderActionbar());
+}
+
+render();
+</script>
+</body>
+</html>
