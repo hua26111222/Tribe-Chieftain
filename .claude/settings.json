@@ -37,7 +37,8 @@
       "Bash(powershell.exe -NoProfile -Command \"Get-ScheduledTaskInfo -TaskName 'Tribe-Chieftain Auto Sync' | Select-Object LastRunTime, LastTaskResult\")",
       "Bash(rm register_task.ps1)",
       "Bash(curl -s -o /dev/null -w \"HTTP_STATUS:%{http_code}\\\\n\" https://hua26111222.github.io/Tribe-Chieftain/)",
-      "Bash(curl -s -o /dev/null -w \"HTTP_STATUS:%{http_code}\\\\n\" https://hua26111222.github.io/Tribe-Chieftain/tribe.html)"
+      "Bash(curl -s -o /dev/null -w \"HTTP_STATUS:%{http_code}\\\\n\" https://hua26111222.github.io/Tribe-Chieftain/tribe.html)",
+      "Read(//c/Users/wb659999/.claude/projects/c--Users-wb659999-OneDrive---WBG-Desktop-----/**)"
     ]
   }
 }
