@@ -38,7 +38,18 @@
       "Bash(rm register_task.ps1)",
       "Bash(curl -s -o /dev/null -w \"HTTP_STATUS:%{http_code}\\\\n\" https://hua26111222.github.io/Tribe-Chieftain/)",
       "Bash(curl -s -o /dev/null -w \"HTTP_STATUS:%{http_code}\\\\n\" https://hua26111222.github.io/Tribe-Chieftain/tribe.html)",
-      "Read(//c/Users/wb659999/.claude/projects/c--Users-wb659999-OneDrive---WBG-Desktop-----/**)"
+      "Read(//c/Users/wb659999/.claude/projects/c--Users-wb659999-OneDrive---WBG-Desktop-----/**)",
+      "Read(//c/Users/wb659999/Downloads/**)",
+      "Read(//c/Users/wb659999/Documents/**)",
+      "Bash(mkdir -p \"c:/Users/wb659999/OneDrive - WBG/Desktop/灶围\")",
+      "Bash(cp \"c:/Users/wb659999/Downloads/灶围_开发规格书_v7.md\" \"c:/Users/wb659999/OneDrive - WBG/Desktop/灶围/SPEC.md\")",
+      "Bash(python \"C:\\\\Users\\\\wb659999\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-wb659999-OneDrive---WBG-Desktop-----\\\\616986e3-1d7c-4f59-8b13-cbc8d82e862b\\\\scratchpad\\\\verify_zaowei_p1.py\")",
+      "Bash(PYTHONIOENCODING=utf-8 python \"C:\\\\Users\\\\wb659999\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-wb659999-OneDrive---WBG-Desktop-----\\\\616986e3-1d7c-4f59-8b13-cbc8d82e862b\\\\scratchpad\\\\verify_zaowei_p1.py\")",
+      "Bash(mkdir -p \"c:/Users/wb659999/OneDrive - WBG/Desktop/灶围/.vscode\")"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\wb659999\\OneDrive - WBG\\Desktop\\灶围",
+      "c:\\Users\\wb659999\\OneDrive - WBG\\Desktop\\灶围\\.vscode"
     ]
   }
 }
